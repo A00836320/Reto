@@ -1,4 +1,4 @@
-#!/Users/diegomorales/Desktop/Reto/.venv/bin/python3.12
+#!/Users/diegomorales/Desktop/Reto/.venv/bin/python
 # -*- coding: utf-8 -*-
 import re
 import sys

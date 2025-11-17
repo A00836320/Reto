@@ -1,0 +1,7 @@
+[theme]
+base="light"
+primaryColor="#4CAF2A"        # Verde Dimex
+backgroundColor="#F5F7FA"     # Gris muy claro
+secondaryBackgroundColor="#FFFFFF"
+textColor="#24323F"           # Azul grisáceo moderno
+font="sans serif"
