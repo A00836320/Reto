@@ -5,6 +5,7 @@ import plotly.express as px
 import streamlit as st
 from pathlib import Path
 from PIL import Image
+import pydeck as pdk
 
 
 # -------------------------------------------------------------------
@@ -301,6 +302,39 @@ body {{
     font-weight: 600 !important;
     color: {DIMEX_COLORS["text_soft"]} !important;
 }}
+
+/* ================================
+   ALERTA DE CLUSTER SELECCIONADO
+================================ */
+.cluster-alert {{
+    margin-top: 0.8rem;
+    margin-bottom: 0.8rem;
+    padding: 0.75rem 1rem;
+    border-radius: 14px;
+    border: 1px solid rgba(76, 175, 42, 0.35);
+    background: linear-gradient(90deg, #ECFDF3, #F4FFF7);
+    color: #14532D;
+    font-size: 0.9rem;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    animation: fadeIn 0.35s ease-out;
+    box-shadow: 0 10px 25px rgba(22, 101, 52, 0.12);
+}}
+
+.cluster-alert-icon {{
+    font-size: 1.1rem;
+}}
+
+.cluster-alert-branch {{
+    font-weight: 700;
+}}
+
+.cluster-alert-cluster {{
+    font-weight: 700;
+    color: #15803D;
+}}
+
 </style>
 """
 
@@ -422,6 +456,98 @@ def compute_kpis(df: pd.DataFrame) -> dict:
     }
 
     return result
+
+def compute_cluster_scores(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Calcula z_0, z_1, z_2 y las probabilidades para cada sucursal,
+    y asigna el cluster con mayor probabilidad.
+    """
+
+    if df.empty:
+        return df
+
+    required_cols = [
+        "Capital Dispersado Actual",
+        "Morosidad Temprana Actual",
+        "% FPD Actual",
+        "ICV",
+        "Saldo Insoluto Vencido Actual",
+        "Ratio_Cartera_Vencida Actual",
+        "Crecimiento Saldo Actual",
+    ]
+
+    missing = [c for c in required_cols if c not in df.columns]
+    if missing:
+        st.error(
+            "Faltan columnas necesarias para el cálculo de clusters ML: "
+            + ", ".join(missing)
+        )
+        return pd.DataFrame()
+
+    df_scored = df.copy()
+
+    # Asegurar que son numéricas
+    for c in required_cols:
+        df_scored[c] = pd.to_numeric(df_scored[c], errors="coerce").fillna(0.0)
+
+    cap   = df_scored["Capital Dispersado Actual"].values
+    mor   = df_scored["Morosidad Temprana Actual"].values
+    fpd   = df_scored["% FPD Actual"].values
+    icv   = df_scored["ICV"].values
+    saldo = df_scored["Saldo Insoluto Vencido Actual"].values
+    ratio = df_scored["Ratio_Cartera_Vencida Actual"].values
+    crec  = df_scored["Crecimiento Saldo Actual"].values
+
+    # ---- z-scores según tus fórmulas ----
+    z0 = (
+        -0.049651
+        + (-0.000011 * cap)
+        + (0.246301 * mor)
+        + (0.068909 * fpd)
+        + (0.043039 * icv)
+        + (0.000006 * saldo)
+        + (0.008315 * ratio)
+        + (-0.356566 * crec)
+    )
+
+    z1 = (
+        -0.497694
+        + (0.000005 * cap)
+        + (-0.012713 * mor)
+        + (-0.151820 * fpd)
+        + (-0.045727 * icv)
+        + (-0.000001 * saldo)
+        + (-0.316812 * ratio)
+        + (0.071495 * crec)
+    )
+
+    z2 = (
+        0.547347
+        + (0.000006 * cap)
+        + (-0.233585 * mor)
+        + (0.082910 * fpd)
+        + (0.002688 * icv)
+        + (-0.000005 * saldo)
+        + (0.308495 * ratio)
+        + (0.285076 * crec)
+    )
+
+    Z = np.vstack([z0, z1, z2]).T  # shape (n, 3)
+
+    # Softmax para probabilidades
+    Z_shift = Z - Z.max(axis=1, keepdims=True)  # estabilidad numérica
+    expZ = np.exp(Z_shift)
+    probs = expZ / expZ.sum(axis=1, keepdims=True)
+
+    df_scored["p_0_0"]   = probs[:, 0]
+    df_scored["p_0_1"]   = probs[:, 1]
+    df_scored["p_Main1"] = probs[:, 2]
+
+    labels = np.array(["0_0", "0_1", "Main_1"])
+    df_scored["Cluster_ML"] = labels[probs.argmax(axis=1)]
+
+    return df_scored
+
 
 # -------------------------------------------------------------------
 # COMPONENTE: TARJETAS KPI
@@ -606,22 +732,174 @@ def render_risk_chart(df: pd.DataFrame):
         '<div class="chart-caption">Ayuda a priorizar gestión de cobranza en sucursales críticas.</div>',
         unsafe_allow_html=True,
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width='content')
     st.markdown("</div>", unsafe_allow_html=True)
 
+# -------------------------------------------------------------------
+# TABLA DE MÉTRICAS POR SEGMENTO (REGIÓN / ZONA / SUCURSAL)
+# -------------------------------------------------------------------
+def render_metrics_tab(df: pd.DataFrame):
+    st.markdown("### 📑 Tabla de métricas por segmento")
+
+    if df.empty:
+        st.info("No hay datos para mostrar con el filtro actual.")
+        return
+
+    # Nivel de agregación elegido por el usuario
+    nivel = st.radio(
+        "Nivel de agregación",
+        ["Región", "Zona", "Sucursal"],
+        horizontal=True,
+        key="nivel_tabla_metricas",
+    )
+
+    if nivel == "Región":
+        group_cols = ["Región"]
+    elif nivel == "Zona":
+        group_cols = ["Región", "Zona"]
+    else:  # "Sucursal"
+        group_cols = ["Región", "Zona", "Sucursal"]
+
+    # Agregación: sumas vs promedios
+    agg = (
+        df.groupby(group_cols)
+        .agg(
+            capital_disper=("Capital Dispersado Actual", "sum"),
+            saldo_vencido=("Saldo Insoluto Vencido Actual", "sum"),
+            morosidad=("Morosidad Temprana Actual", "mean"),
+            fpd=("% FPD Actual", "mean"),
+            icv=("ICV", "mean"),
+            ratio_vencida=("Ratio_Cartera_Vencida Actual", "mean"),
+            crec_saldo=("Crecimiento Saldo Actual", "mean"),
+            n_suc=("Sucursal", "nunique"),
+        )
+        .reset_index()
+    )
+
+    # Pasar ratios a porcentaje (0–100) con 1 decimal
+    perc_cols = ["morosidad", "fpd", "icv", "ratio_vencida", "crec_saldo"]
+    agg[perc_cols] = agg[perc_cols].apply(lambda s: (s * 100).round(1))
+
+    st.dataframe(agg, use_container_width=True)
+
+# Vista para lo de ML"
+def render_cluster_tab(df: pd.DataFrame):
+    st.markdown("### 🧠 Score de riesgo por sucursal (modelo ML)")
+
+    if df.empty:
+        st.info("No hay datos para calcular los clusters ML con el filtro actual.")
+        return
+
+    df_scored = compute_cluster_scores(df)
+    if df_scored.empty:
+        return
+
+    # Selector de sucursales
+    sucursales_opts = sorted(df_scored["Sucursal"].dropna().unique().tolist())
+    seleccionadas = st.multiselect(
+        "Selecciona una o varias sucursales para revisar su cluster:",
+        options=sucursales_opts,
+        default=sucursales_opts,      # 👉 ahora, por defecto, TODAS las sucursales filtradas
+    )
+
+    if seleccionadas:
+        df_view = df_scored[df_scored["Sucursal"].isin(seleccionadas)].copy()
+    else:
+        df_view = df_scored.copy()
+
+    # ---------- Tarjetas resumen por cluster ----------
+    cluster_counts = (
+        df_view["Cluster_ML"]
+        .value_counts()
+        .reindex(["0_0", "0_1", "Main_1"])
+        .fillna(0)
+        .astype(int)
+    )
+
+    # OJO: el HTML va SIN espacios al inicio, pegado a la izquierda
+    kpi_html = f"""<div class="kpi-grid">
+<div class="kpi-card">
+    <div class="kpi-label">Cluster 0_0</div>
+    <div class="kpi-value">{cluster_counts["0_0"]}</div>
+    <div class="kpi-caption">
+        Sucursales consolidadas / menor riesgo relativo.
+    </div>
+</div>
+
+<div class="kpi-card">
+    <div class="kpi-label">Cluster 0_1</div>
+    <div class="kpi-value">{cluster_counts["0_1"]}</div>
+    <div class="kpi-caption">
+        Sucursales en riesgo / cartera más tensa.
+    </div>
+</div>
+
+<div class="kpi-card">
+    <div class="kpi-label">Cluster Main_1</div>
+    <div class="kpi-value">{cluster_counts["Main_1"]}</div>
+    <div class="kpi-caption">
+        Sucursales con potencial de crecimiento controlado.
+    </div>
+</div>
+</div>"""
+
+    st.markdown(kpi_html, unsafe_allow_html=True)
+
+    # ---------- Banner bonito para UNA sola sucursal ----------
+    if len(seleccionadas) == 1 and not df_view.empty:
+        suc = seleccionadas[0]
+        cluster = df_view.iloc[0]["Cluster_ML"]
+
+        banner_html = f"""<div class="cluster-alert">
+<span class="cluster-alert-icon">📌</span>
+La sucursal <span class="cluster-alert-branch">{suc}</span>
+se clasifica en el cluster
+<span class="cluster-alert-cluster">{cluster}</span>
+según el modelo ML.
+</div>"""
+
+        st.markdown(banner_html, unsafe_allow_html=True)
+
+    # ---------- Tabla de detalle ----------
+    df_table = df_view[
+        [
+            "Región",
+            "Zona",
+            "Sucursal",
+            "Cluster_ML",
+            "p_0_0",
+            "p_0_1",
+            "p_Main1",
+        ]
+    ].copy()
+
+    df_table["p_0_0"] = (df_table["p_0_0"] * 100).round(1)
+    df_table["p_0_1"] = (df_table["p_0_1"] * 100).round(1)
+    df_table["p_Main1"] = (df_table["p_Main1"] * 100).round(1)
+
+    df_table = df_table.rename(
+        columns={
+            "Cluster_ML": "Cluster asignado",
+            "p_0_0": "% Prob. 0_0",
+            "p_0_1": "% Prob. 0_1",
+            "p_Main1": "% Prob. Main_1",
+        }
+    )
+
+    st.markdown("#### 📋 Detalle de sucursales y probabilidad por cluster")
+    st.dataframe(
+        df_table,
+        use_container_width=True,
+    )
 
 # -------------------------------------------------------------------
 # LAYOUT PRINCIPAL
 # -------------------------------------------------------------------
 def main():
-    # Encabezado tipo Dimex
-        # Encabezado con logo + título
-    header_left, header_right = st.columns([1, 4])
+    # Encabezado tipo Dimex (lo dejamos igual)
+    col_left, col_right = st.columns([3, 1], gap="large")
 
-    with header_left:
-        st.image(logo, width=110)
-
-    with header_right:
+    with col_left:
         st.markdown(
             """
             <div class="dimex-header">
@@ -631,6 +909,15 @@ def main():
                         Visibilidad ejecutiva de cartera por región, zona y sucursal.
                     </div>
                 </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    with col_right:
+        st.markdown(
+            """
+            <div class="dimex-header" style="justify-content:flex-end;">
                 <div class="dimex-badge">
                     BETA · Riesgo & Originación
                 </div>
@@ -646,26 +933,46 @@ def main():
         get_default_dataframe()
     )
 
-    if df_filtered is None:
+    if df_filtered is None or df_filtered.empty:
+        st.info("Carga una base y/o ajusta los filtros para ver información.")
         st.stop()
 
-    # Sección principal: KPIs + gráfico
-    with st.container():
-        kpis = compute_kpis(df_filtered)
-        render_kpi_cards(kpis)
+    # Tabs principales del dashboard
+    tab_resumen, tab_ml, tab_table = st.tabs(
+        [
+            "📊 Resumen cartera",
+            "🧠 Clusters ML por sucursal",
+            "📑 Tabla detallada",
+        ]
+    )
 
-        # Subtítulo contextual pequeño
-        region_txt = region_sel if region_sel != "Todas" else "todas las regiones"
-        zona_txt = zona_sel if zona_sel != "Todas" else "todas las zonas"
-        suc_txt = sucursal_sel if sucursal_sel != "Todas" else "todas las sucursales"
+    # ---------- TAB 1: Resumen cartera ----------
+    with tab_resumen:
+        with st.container():
+            kpis = compute_kpis(df_filtered)
+            render_kpi_cards(kpis)
 
-        st.caption(
-            f"Vista actual: **{region_txt}** · **{zona_txt}** · **{suc_txt}** "
-            f" — datos agregados directamente de la base de sucursales."
-        )
+            # Subtítulo contextual pequeño
+            region_txt = region_sel if region_sel != "Todas" else "todas las regiones"
+            zona_txt = zona_sel if zona_sel != "Todas" else "todas las zonas"
+            suc_txt = (
+                sucursal_sel if sucursal_sel != "Todas" else "todas las sucursales"
+            )
 
-        render_risk_chart(df_filtered)
+            st.caption(
+                f"Vista actual: **{region_txt}** · **{zona_txt}** · **{suc_txt}** "
+                f"— datos agregados directamente de la base de sucursales."
+            )
 
+            render_risk_chart(df_filtered)
+
+    # ---------- TAB 2: Clusters ML ----------
+    with tab_ml:
+        render_cluster_tab(df_filtered)
+
+    # ---------- TAB 3: Tabla detallada ----------
+    with tab_table:
+        render_metrics_tab(df_filtered)
 
 if __name__ == "__main__":
     main()
