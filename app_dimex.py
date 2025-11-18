@@ -7,6 +7,16 @@ from pathlib import Path
 from PIL import Image
 import pydeck as pdk
 
+# ---------------------------------------------
+# USUARIOS Y ROLES (login muy simple)
+# ---------------------------------------------
+USERS = {
+    "admin": "admin",      # usuario: rol
+    "empleado": "empleado"
+    # aquí puedes agregar más, por ejemplo:
+    # "juan": "empleado",
+    # "gerente": "admin",
+}   
 
 # -------------------------------------------------------------------
 # CONFIGURACIÓN BÁSICA
@@ -548,6 +558,38 @@ def compute_cluster_scores(df: pd.DataFrame) -> pd.DataFrame:
 
     return df_scored
 
+# -------------------------------------------------------------------
+# LOGIN SENCILLO (Administrador / Empleado)
+# -------------------------------------------------------------------
+def show_login():
+    st.markdown("## 🔐 Inicio de sesión")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        # ⬇⬇⬇ KEY ÚNICO PARA ESTE TEXT_INPUT
+        user = st.text_input("Usuario", key="login_user")
+
+    with col2:
+        # También con key único
+        role = st.selectbox(
+            "Tipo de usuario",
+            ["Administrador", "Empleado"],
+            key="login_role"
+        )
+
+    # Botón con key único
+    login_btn = st.button("Entrar", key="login_button")
+
+    if login_btn:
+        if user.strip() == "":
+            st.warning("Escribe un usuario para continuar.")
+        else:
+            st.session_state["logged_in"] = True
+            st.session_state["user"] = user.strip()
+            st.session_state["role"] = role
+            st.rerun()
+
 
 # -------------------------------------------------------------------
 # COMPONENTE: TARJETAS KPI
@@ -893,41 +935,7 @@ según el modelo ML.
     )
 
 # -------------------------------------------------------------------
-# LAYOUT PRINCIPAL
-# -------------------------------------------------------------------
-def main():
-    # Encabezado tipo Dimex (lo dejamos igual)
-    col_left, col_right = st.columns([3, 1], gap="large")
-
-    with col_left:
-        st.markdown(
-            """
-            <div class="dimex-header">
-                <div class="dimex-title-block">
-                    <div class="dimex-title">Dimex Intelligence Board</div>
-                    <div class="dimex-subtitle">
-                        Visibilidad ejecutiva de cartera por región, zona y sucursal.
-                    </div>
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-    with col_right:
-        st.markdown(
-            """
-            <div class="dimex-header" style="justify-content:flex-end;">
-                <div class="dimex-badge">
-                    BETA · Riesgo & Originación
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-    st.markdown("---")
-
+def render_admin_dashboard():
     # Filtros (sidebar) y datos filtrados
     df_filtered, region_sel, zona_sel, sucursal_sel = build_filters(
         get_default_dataframe()
@@ -935,7 +943,7 @@ def main():
 
     if df_filtered is None or df_filtered.empty:
         st.info("Carga una base y/o ajusta los filtros para ver información.")
-        st.stop()
+        return
 
     # Tabs principales del dashboard
     tab_resumen, tab_ml, tab_table = st.tabs(
@@ -952,7 +960,6 @@ def main():
             kpis = compute_kpis(df_filtered)
             render_kpi_cards(kpis)
 
-            # Subtítulo contextual pequeño
             region_txt = region_sel if region_sel != "Todas" else "todas las regiones"
             zona_txt = zona_sel if zona_sel != "Todas" else "todas las zonas"
             suc_txt = (
@@ -974,5 +981,84 @@ def main():
     with tab_table:
         render_metrics_tab(df_filtered)
 
+def render_employee_dashboard():
+    st.markdown("### 👷 Vista empleado")
+
+    st.write("Carga tu archivo para continuar. La visualización estará disponible más adelante.")
+
+    archivo = st.file_uploader(
+        "Subir archivo de sucursales (Excel o CSV)",
+        type=["xlsx", "csv"],
+        help="Selecciona el archivo que te hayan proporcionado."
+    )
+
+    if archivo is not None:
+        st.success("✅ Archivo cargado correctamente. El panel para empleados estará disponible próximamente.")
+        # 👇 Importante: por ahora NO hacemos nada con el archivo.
+        # Nada de filtros, KPIs, tablas, ni gráficos todavía.
+
+# -------------------------------------------------------------------
+# LAYOUT PRINCIPAL CON LOGIN Y ROLES
+# -------------------------------------------------------------------
+def main():
+    # 1. Encabezado
+    col_left, col_right = st.columns([3, 1], gap="large")
+    with col_left:
+        st.markdown(
+            """
+            <div class="dimex-header">
+                <div class="dimex-title-block">
+                    <div class="dimex-title">Dimex Intelligence Board</div>
+                    <div class="dimex-subtitle">
+                        Visibilidad ejecutiva de cartera por región, zona y sucursal.
+                    </div>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    with col_right:
+        st.markdown(
+            """
+            <div class="dimex-header" style="justify-content:flex-end;">
+                <div class="dimex-badge">
+                    BETA · Riesgo & Originación
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    st.markdown("---")
+
+    # 2. Inicializar session_state
+    if "logged_in" not in st.session_state:
+        st.session_state["logged_in"] = False
+        st.session_state["user"] = None
+        st.session_state["role"] = None
+
+    # 3. Si NO está logueado → mostrar login
+    if not st.session_state["logged_in"]:
+        show_login()
+        return
+
+    # 4. Si SÍ está logueado → botón de logout
+    col_user, col_logout = st.columns([4, 1])
+    with col_user:
+        st.caption(f"👤 Usuario: **{st.session_state['user']}** · Rol: **{st.session_state['role']}**")
+    with col_logout:
+        if st.button("Cerrar sesión", key="logout_button"):
+            for k in ["logged_in", "user", "role"]:
+                st.session_state.pop(k, None)
+            st.rerun()
+
+    # 5. Dashboard según rol    
+    if st.session_state["role"] == "Administrador":
+        render_admin_dashboard()
+    else:
+        render_employee_dashboard()
+
+
 if __name__ == "__main__":
     main()
+
