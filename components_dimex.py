@@ -54,7 +54,7 @@ def render_kpi_cards(kpis: dict):
                 <span>vs histórico promedio</span>
             </div>
             <div class="kpi-caption">
-                Variación relativa del saldo insoluto respecto a los últimos 12 meses.
+                Variación relativa del saldo insoluto respecto al último mes.
             </div>
         </div>
         """,
