@@ -230,3 +230,151 @@ def render_metrics_tab(df: pd.DataFrame):
     agg[perc_cols] = agg[perc_cols].apply(lambda s: (s * 100).round(1))
 
     st.dataframe(agg, use_container_width=True)
+
+# =========================
+# VISTA PARA EMPLEADOS
+# =========================
+
+# Mapeo simple de descripción de clusters para sucursales
+CLUSTER_EMPLOYEE_TEXT = {
+    "0_1": {
+        "title": "⚠️ Sucursal en alerta (Cluster 0_1 · Cartera en riesgo)",
+        "summary": (
+            "Presenta indicadores de morosidad y FPD por arriba del promedio. "
+            "La prioridad es contener el riesgo y reforzar la cobranza."
+        ),
+        "bullets": [
+            "Revisar diariamente la lista de créditos en atraso y priorizar los mayores saldos.",
+            "Contactar primero a clientes con FPD reciente (0–30 días) para evitar que escalen a mora dura.",
+            "Reforzar políticas de originación: reducir montos y plazos para nuevos créditos de alto riesgo.",
+        ],
+    },
+    "Main_1": {
+        "title": "📈 Potencial de crecimiento (Main_1 · Riesgo medio)",
+        "summary": (
+            "La sucursal tiene una cartera con riesgo controlado y espacio para crecer. "
+            "Se pueden impulsar colocaciones cuidando la calidad."
+        ),
+        "bullets": [
+            "Identificar clientes con buen comportamiento para ofrecer incrementos de línea o nuevos productos.",
+            "Monitorear semanalmente indicadores de morosidad y FPD para no salir del rango objetivo.",
+            "Coordinarse con originación para campañas específicas en segmentos de menor riesgo.",
+        ],
+    },
+    "0_0": {
+        "title": "✅ Sucursal consolidada (0_0 · Menor riesgo relativo)",
+        "summary": (
+            "La sucursal muestra buen control de riesgo y cartera sana. "
+            "Es un referente para compartir buenas prácticas."
+        ),
+        "bullets": [
+            "Documentar prácticas exitosas de cobranza y originación para replicarlas en otras sucursales.",
+            "Mantener seguimiento preventivo a cuentas con primeros días de atraso.",
+            "Explorar crecimiento en clientes similares al perfil actual de buena cartera.",
+        ],
+    },
+}
+
+
+def render_cluster_badge(cluster_label: str):
+    """
+    Muestra una tarjetita con el cluster de la sucursal y su resumen.
+    """
+    info = CLUSTER_EMPLOYEE_TEXT.get(cluster_label)
+
+    if info is None:
+        st.info(f"Cluster asignado a la sucursal: **{cluster_label}**")
+        return
+
+    st.markdown(
+        f"""
+        <div class="kpi-grid">
+          <div class="kpi-card" style="border-left: 4px solid {DIMEX_COLORS['primary']};">
+            <div class="kpi-label">Cluster sucursal</div>
+            <div class="kpi-value">{info['title']}</div>
+            <div class="kpi-caption">{info['summary']}</div>
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_employee_risk_charts(df_suc):
+    """
+    Gráficas sencillas e interactivas para que el empleado vea
+    el perfil de riesgo de su sucursal.
+    Espera un DataFrame filtrado a UNA sola sucursal.
+    """
+    if df_suc is None or df_suc.empty:
+        st.info("No hay información para la sucursal seleccionada.")
+        return
+
+    row = df_suc.iloc[0]
+
+    capital = row.get("Capital Dispersado Actual")
+    saldo_vencido = row.get("Saldo Insoluto Vencido Actual")
+    morosidad = row.get("Morosidad Temprana Actual")
+    fpd = row.get("% FPD Actual")
+    ratio = row.get("Ratio_Cartera_Vencida Actual")
+
+    st.markdown("### 📊 Comportamiento de la sucursal")
+
+    col1, col2 = st.columns(2)
+
+    # Gráfica 1: capital vs saldo vencido
+    with col1:
+        data_montos = pd.DataFrame(
+            {
+                "Concepto": ["Capital dispersado", "Saldo vencido"],
+                "Monto": [capital, saldo_vencido],
+            }
+        )
+        fig1 = px.bar(
+            data_montos,
+            x="Concepto",
+            y="Monto",
+            title="Capital vs saldo vencido",
+            labels={"Monto": "Monto (MXN)"},
+        )
+        fig1.update_layout(margin=dict(l=10, r=10, t=40, b=10))
+        st.plotly_chart(fig1, use_container_width=True)
+
+    # Gráfica 2: morosidad, FPD y ratio
+    with col2:
+        data_riesgo = pd.DataFrame(
+            {
+                "Indicador": ["Morosidad temprana", "FPD", "Ratio cartera vencida"],
+                "Valor": [morosidad, fpd, ratio],
+            }
+        )
+        fig2 = px.bar(
+            data_riesgo,
+            x="Indicador",
+            y="Valor",
+            title="Indicadores clave de riesgo",
+            labels={"Valor": "Porcentaje"},
+        )
+        fig2.update_layout(margin=dict(l=10, r=10, t=40, b=10))
+        st.plotly_chart(fig2, use_container_width=True)
+
+
+def render_branch_recommendations(cluster_label: str):
+    """
+    Lista de recomendaciones operativas dependiendo del cluster.
+    """
+    info = CLUSTER_EMPLOYEE_TEXT.get(cluster_label)
+
+    st.markdown("### 🧭 Recomendaciones para la sucursal")
+
+    if info is None:
+        st.write(
+            "Por ahora no hay recomendaciones específicas para este cluster. "
+            "Consulta con el área de Riesgos para lineamientos adicionales."
+        )
+        return
+
+    st.markdown(f"**{info['summary']}**")
+
+    for bullet in info["bullets"]:
+        st.markdown(f"- {bullet}")

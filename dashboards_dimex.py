@@ -1,4 +1,5 @@
 import streamlit as st
+import pandas as pd
 
 from data_dimex import build_filters
 from metrics_dimex import compute_kpis
@@ -52,22 +53,129 @@ def render_admin_dashboard():
 
 
 def render_employee_dashboard():
-    st.markdown("### 👷 Vista empleado")
-
-    st.write(
-        "Carga tu archivo para continuar. "
-        "La visualización estará disponible más adelante."
+    """
+    Vista para empleados: cada usuario sólo ve el detalle de SU sucursal.
+    1) El empleado sube el archivo
+    2) Selecciona sucursal
+    3) Ingresa contraseña de sucursal
+    4) Ve KPIs, cluster, gráficas y recomendaciones
+    """
+    from auth_dimex import BRANCH_PASSWORDS
+    from ml_clusters_dimex import compute_cluster_scores
+    from metrics_dimex import compute_kpis
+    from components_dimex import (
+        render_kpi_cards,
+        render_cluster_badge,
+        render_employee_risk_charts,
+        render_branch_recommendations,
     )
 
-    archivo = st.file_uploader(
-        "Subir archivo de sucursales (Excel o CSV)",
+    st.markdown("## 👷 Panel de empleado por sucursal")
+
+    # 1. Subida de archivo específica para el empleado
+    st.markdown("### 📂 Sube el archivo de sucursales")
+    uploaded_file = st.file_uploader(
+        "Carga el archivo con la información de sucursales (.xlsx o .csv)",
         type=["xlsx", "csv"],
-        help="Selecciona el archivo que te hayan proporcionado."
+        key="emp_file_uploader",
     )
 
-    if archivo is not None:
-        st.success(
-            "✅ Archivo cargado correctamente. "
-            "El panel para empleados estará disponible próximamente."
+    if uploaded_file is None:
+        st.info("Por favor sube el archivo para poder ver la información de tu sucursal.")
+        return
+
+    # 2. Leer el archivo subido
+    try:
+        if uploaded_file.name.lower().endswith(".csv"):
+            df = pd.read_csv(uploaded_file)
+        else:
+            df = pd.read_excel(uploaded_file)
+    except Exception as e:
+        st.error(f"No se pudo leer el archivo. Revisa el formato. Detalle técnico: {e}")
+        return
+
+    if df is None or df.empty:
+        st.warning("El archivo se leyó pero no contiene registros.")
+        return
+
+    # Validar que exista la columna Sucursal
+    if "Sucursal" not in df.columns:
+        st.error(
+            "El archivo no tiene la columna 'Sucursal'. "
+            "Verifica que el archivo tenga esa columna con ese nombre exacto."
         )
-        # Por ahora NO hacemos nada con el archivo.
+        return
+
+    # 3. Calcular clusters si todavía no existen en el DataFrame
+    if "Cluster_ML" not in df.columns:
+        df = compute_cluster_scores(df)
+
+    if "Cluster_ML" not in df.columns:
+        st.warning(
+            "No se encontró la columna 'Cluster_ML' después del cálculo. "
+            "Revisa el módulo ml_clusters_dimex.py."
+        )
+        return
+
+    # 4. Selección de sucursal
+    sucursales = sorted(df["Sucursal"].dropna().unique())
+    sucursal_sel = st.selectbox(
+        "Selecciona tu sucursal",
+        options=sucursales,
+        key="emp_sucursal_select",
+    )
+
+    # 5. Validación de contraseña por sucursal
+    st.markdown("### 🔑 Verificación de sucursal")
+    st.caption(
+        "Ingresa la contraseña asignada a tu sucursal. "
+        "Si no la conoces, solicítala al administrador del sistema."
+    )
+
+    branch_pwd_conf = BRANCH_PASSWORDS.get(sucursal_sel)
+
+    if branch_pwd_conf is None:
+        st.error(
+            "Esta sucursal todavía no tiene una contraseña configurada en "
+            "`BRANCH_PASSWORDS` (archivo auth_dimex.py). "
+            "Pídele al administrador que la registre."
+        )
+        return
+
+    input_pwd = st.text_input(
+        "Contraseña de la sucursal",
+        type="password",
+        key="emp_branch_pwd",
+    )
+
+    # Hasta que no escriba algo, no seguimos
+    if input_pwd == "":
+        st.stop()
+
+    if input_pwd != branch_pwd_conf:
+        st.error("Contraseña incorrecta. Verifica los datos e inténtalo nuevamente.")
+        st.stop()
+
+    # 6. Filtrar DataFrame a la sucursal validada
+    df_suc = df[df["Sucursal"] == sucursal_sel].copy()
+
+    if df_suc.empty:
+        st.warning(
+            "No se encontró información para la sucursal seleccionada "
+            "después del filtrado."
+        )
+        return
+
+    # 7. Cluster de la sucursal
+    cluster_label = str(df_suc["Cluster_ML"].iloc[0])
+    render_cluster_badge(cluster_label)
+
+    # 8. KPIs específicos de la sucursal (reusamos compute_kpis)
+    kpis_suc = compute_kpis(df_suc)
+    render_kpi_cards(kpis_suc)
+
+    # 9. Gráficas específicas para el empleado
+    render_employee_risk_charts(df_suc)
+
+    # 10. Recomendaciones según cluster
+    render_branch_recommendations(cluster_label)

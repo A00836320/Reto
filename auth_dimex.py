@@ -9,6 +9,17 @@ USERS = {
     # "gerente": "admin",
 }
 
+# Contraseñas por sucursal (para vista de empleado)
+# Usa EXACTAMENTE el mismo nombre de sucursal que viene en el Excel.
+# Ejemplo; reemplaza/añade las tuyas reales:
+BRANCH_PASSWORDS = {
+    # "Nombre de sucursal en el Excel": "contraseña",
+    "San Nicolás Valle BIS": "12345",
+    "Valle Chalco": "12345",
+    "Puente de Tlalne": "12345",
+    # Agrega aquí todas las sucursales que quieras habilitar
+}
+
 
 def show_login():
     st.markdown("## 🔐 Inicio de sesión")

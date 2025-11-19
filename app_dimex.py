@@ -12,7 +12,18 @@ from dashboards_dimex import render_admin_dashboard, render_employee_dashboard
 # -------------------------------------------------------------------
 BASE_DIR = Path(__file__).parent
 logo_path = BASE_DIR / "Logo-dimex111.png"
-logo = Image.open(logo_path)
+
+try:
+    logo = Image.open(logo_path)
+except FileNotFoundError:
+    logo = None
+
+st.set_page_config(
+    page_title="Dimex | Tablero de Sucursales",
+    page_icon=logo if logo is not None else "💳",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
 
 st.set_page_config(
     page_title="Dimex | Tablero de Sucursales",
