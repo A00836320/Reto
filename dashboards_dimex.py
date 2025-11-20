@@ -3,7 +3,16 @@ import pandas as pd
 
 from data_dimex import build_filters
 from metrics_dimex import compute_kpis
-from components_dimex import render_kpi_cards, render_risk_chart, render_metrics_tab
+from components_dimex import (
+    render_kpi_cards,
+    render_risk_chart,
+    render_metrics_tab,
+    admin_chart_bubble,
+    admin_chart_heatmap,
+    admin_chart_rankings,
+    admin_chart_clusters,
+    admin_chart_growth_vs_risk,
+)
 from ml_clusters_dimex import render_cluster_tab
 
 
@@ -27,6 +36,7 @@ def render_admin_dashboard():
     # TAB 1: Resumen cartera
     with tab_resumen:
         with st.container():
+            # KPIs generales
             kpis = compute_kpis(df_filtered)
             render_kpi_cards(kpis)
 
@@ -41,7 +51,17 @@ def render_admin_dashboard():
                 f"— datos agregados directamente de la base de sucursales."
             )
 
+            # Gráfica que ya tenías (riesgo top sucursales)
             render_risk_chart(df_filtered)
+
+            # 🆕 NUEVO BLOQUE: gráficas avanzadas para admin
+            st.markdown("### 🔍 Vista ejecutiva de riesgo por sucursal")
+
+            admin_chart_bubble(df_filtered)
+            admin_chart_heatmap(df_filtered)
+            admin_chart_rankings(df_filtered)
+            admin_chart_clusters(df_filtered)
+            admin_chart_growth_vs_risk(df_filtered)
 
     # TAB 2: Clusters ML
     with tab_ml:

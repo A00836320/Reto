@@ -96,7 +96,7 @@ def compute_cluster_scores(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def render_cluster_tab(df: pd.DataFrame):
-    st.markdown("### 🧠 Score de riesgo por sucursal (modelo ML)")
+    st.markdown("### Score de riesgo por sucursal (modelo ML)")
 
     if df.empty:
         st.info("No hay datos para calcular los clusters ML con el filtro actual.")
@@ -130,26 +130,26 @@ def render_cluster_tab(df: pd.DataFrame):
 
     kpi_html = f"""<div class="kpi-grid">
 <div class="kpi-card">
-    <div class="kpi-label">Cluster 0_0</div>
+    <div class="kpi-label">Sucursales consolidadas / menor riesgo relativo.</div>
     <div class="kpi-value">{cluster_counts["0_0"]}</div>
     <div class="kpi-caption">
-        Sucursales consolidadas / menor riesgo relativo.
+        Cluster 0_0
     </div>
 </div>
 
 <div class="kpi-card">
-    <div class="kpi-label">Cluster 0_1</div>
+    <div class="kpi-label">Sucursales en riesgo / cartera más tensa.</div>
     <div class="kpi-value">{cluster_counts["0_1"]}</div>
     <div class="kpi-caption">
-        Sucursales en riesgo / cartera más tensa.
+        Cluster 0_1
     </div>
 </div>
 
 <div class="kpi-card">
-    <div class="kpi-label">Cluster Main_1</div>
+    <div class="kpi-label">Sucursales con potencial de crecimiento controlado.</div>
     <div class="kpi-value">{cluster_counts["Main_1"]}</div>
     <div class="kpi-caption">
-        Sucursales con potencial de crecimiento controlado.
+        Cluster Main_1
     </div>
 </div>
 </div>"""
@@ -197,7 +197,7 @@ según el modelo ML.
         }
     )
 
-    st.markdown("#### 📋 Detalle de sucursales y probabilidad por cluster")
+    st.markdown("####  Detalle de sucursales y probabilidad por cluster")
     st.dataframe(
         df_table,
         use_container_width=True,
